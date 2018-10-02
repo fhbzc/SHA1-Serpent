@@ -1,0 +1,172 @@
+
+
+require "debug"
+require "utils"
+
+# author: Hongbo Fang
+# Date: 2018-10-03
+
+Base64Convert = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+
+
+
+def _left_rotate(n, b):
+    # Left rotate a 32-bit integer n by b bits.
+    return ((n << b) | (n >> (32 - b))) & 0xffffffff
+
+
+def _process_chunk(chunk, h0, h1, h2, h3, h4):
+    # Process a chunk of data and return the new digest variables.
+    # assert len(chunk) == 64
+
+    w = [i for i = 0 to 80]
+
+    # Break chunk into sixteen 4-byte big-endian words w[i]
+
+    for i = 0 to 16:
+        var s = 0
+        for j = 0 to 4:
+            s = s * 256
+            s = s + ord(chunk[i * 4+j])
+            
+        w[i] = s
+
+    # Extend the sixteen 4-byte words into eighty 4-byte words
+    for i = 16 to 80:
+        w[i] = _left_rotate(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1)
+    
+
+
+    # Initialize hash value for this chunk
+    a = h0
+    b = h1
+    c = h2
+    d = h3
+    e = h4
+
+    for i = 0 to 80:
+        if 0 <= i and i <= 19:
+            # Use alternative 1 for f from FIPS PB 180-1 to avoid bitwise not
+            f = d ^ (b & (c ^ d))
+            k = 0x5A827999
+        elif 20 <= i and i <= 39:
+            f = b ^ c ^ d
+            k = 0x6ED9EBA1
+        elif 40 <= i and i <= 59:
+            f = (b & c) | (b & d) | (c & d)
+            k = 0x8F1BBCDC
+        elif 60 <= i and i <= 79:
+            f = b ^ c ^ d
+            k = 0xCA62C1D6
+
+        t_a = (_left_rotate(a, 5) + f + e + k + w[i]) & 0xffffffff
+        t_b = a
+        t_c = _left_rotate(b, 30)
+        t_d = c
+        t_e = d
+        
+        a = t_a
+        b = t_b
+        c = t_c
+        d = t_d
+        e = t_e
+
+    # Add this chunk's hash to result so far
+    h0 = (h0 + a) & 0xffffffff
+    h1 = (h1 + b) & 0xffffffff
+    h2 = (h2 + c) & 0xffffffff
+    h3 = (h3 + d) & 0xffffffff
+    h4 = (h4 + e) & 0xffffffff
+
+    return [h0, h1, h2, h3, h4]
+
+def Base64(int_list):
+    # all these below is a base64 code
+    # we have 5 intergers, each corresponds to 4 bytes, that's 20 bytes in total
+    var bytes_left_right = [0 for t = 0 to 84] # should be 20 * 4, with 4 additional padding
+    var addition_equal = 1
+
+    for i = 0 to len(int_list):
+        var this_dig = int_list[i]
+        var cur_level = 1
+        var stack_cof = 4
+        for j = 0 to 16:
+            bytes_left_right[16 * i + 15 - j] = int(this_dig / cur_level) % stack_cof
+            cur_level = cur_level * stack_cof
+
+    var res_string = ""
+    for i = 0 to 27: # 84/3 = 28, 28 - 1 = 27(the last one should be replaced by '=')
+        var s = bytes_left_right[i * 3 ] * 16 + bytes_left_right[i * 3 + 1] * 4 + bytes_left_right[i * 3 + 2]
+        res_string = res_string + Base64Convert[s]
+
+    res_string = res_string + "="
+    return res_string
+
+class Sha1Hash:
+
+    var name
+    var digest_size
+    var block_size
+    var _h
+    var _unprocessed
+    var _message_byte_length
+    def init():
+        # Initial digest variables
+        _h = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0]
+        name = 'python-sha1'
+        digest_size = 20
+        block_size = 64
+        # bytes object with 0 <= len < 64 used to store the end of the message
+        # if the message length is not congruent to 64
+        _unprocessed = nil # should be a byte
+
+        # Length in bytes of all data that has been processed so far
+        _message_byte_length = 0
+
+    def update(chunk):
+
+
+        if len(chunk) >= 64:
+            print "Warning in 'Sha1Hash.update', chunk is too large, very likely to be error"
+
+        _unprocessed = chunk
+        # note the chunk is still string, not binary yet 
+        return this
+
+    def digest():
+        var dig = this._produce_digest()
+        
+
+        return Base64(dig)
+
+    def _produce_digest():
+        # Pre-processing:
+
+        message = this._unprocessed
+
+        message_byte_length =  len(message)
+
+        message = message + chr(128)
+
+        for i = len(message) to 64:
+            message = message + chr(0)
+        
+        for i = 64 to 126:
+            message = message + chr(0)
+
+        message_bit_length = message_byte_length * 8
+        t1 = chr(int(message_bit_length / 256))
+        t2 = chr(message_bit_length % 256)
+
+        message = message + t1
+        message = message + t2
+
+        h = _process_chunk(subseq(message,0,64), this._h[0],this._h[1],this._h[2],this._h[3],this._h[4])
+
+        return _process_chunk(subseq(message,64), h[0],h[1],h[2],h[3],h[4])
+
+
+def sha1_with_magic(msg):
+    magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    return Sha1Hash().update(msg + magic).digest()
+
